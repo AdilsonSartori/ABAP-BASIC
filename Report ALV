@@ -1,0 +1,809 @@
+*****&---------------------------------------------------------------------*
+*****& Report ZREPO_EXCPF_USUARIO_ALUNO34
+*****&---------------------------------------------------------------------*
+****REPORT zrepo_excpf_usuario_aluno34.
+****
+***** Tabelas transparentes
+****TABLES:
+****  ztbsd_aluno034, "Tabela transparente criada
+****  j_1bnfdoc, "Tabela de cabeçalho de notas fiscais
+****  j_1bnflin. "Tabela de itens de notas fiscais
+****
+***** Variáveis globais
+****DATA:
+****  gt_output     TYPE TABLE OF ztbsd_aluno034, "Tabela interna para armazenar dados
+****  go_alv        TYPE REF TO cl_salv_table, "Objeto para exibição de dados em tabela (ALV)
+****  go_functions  TYPE REF TO cl_salv_functions, "Funções do ALV
+****  go_columns    TYPE REF TO cl_salv_columns_table, "Colunas do ALV
+****  gv_mode       TYPE c, "Modo - Inserir, Visualizar, Deletar
+****  go_zclass     TYPE REF TO zcl_messages_aluno034, " Classe de mensagens
+****  gv_background TYPE abap_bool VALUE abap_false. "Indica se execução é em background
+****
+***** Tela de seleção
+****SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+****  SELECT-OPTIONS: s_docnum FOR j_1bnfdoc-docnum OBLIGATORY. "Nº do Documento- SELECT-OPTIONS cria um intervalo de seleção
+****
+****  SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
+****    PARAMETERS: "Cria parâmetros de entrada
+****      p_insert RADIOBUTTON GROUP grp1 USER-COMMAND mode, "Inserir Dados
+****      p_view   RADIOBUTTON GROUP grp1 DEFAULT 'X',      "Visualizar Dados
+****      p_delete RADIOBUTTON GROUP grp1.                   "Deletar Registros
+****  SELECTION-SCREEN END OF BLOCK b2.
+****SELECTION-SCREEN END OF BLOCK b1.
+****
+***** Inicialização
+****INITIALIZATION.
+****  CREATE OBJECT go_zclass.
+****
+****START-OF-SELECTION. "Procesamento do programa principal
+****  gv_background = sy-batch. "Verifica se o programa está sendo executado em background
+****
+*****  Define o modo com base na seleção do usuário
+****  IF p_insert = abap_true.
+****    gv_mode = 'I'.
+****  ELSEIF p_view = abap_true.
+****    gv_mode = 'V'.
+****  ELSEIF p_delete = abap_true.
+****    gv_mode = 'D'.
+****  ENDIF.
+****
+*****Verifica se foi informado algum documento (apenas para inserir/deletar)
+***** essa verificação é importante para que não seja inserido dados inválidos ou duplicados
+***** e para o delete não apagar toda a tabela acidentalmente
+****  IF ( gv_mode = 'I' OR gv_mode = 'D' ) AND s_docnum[] IS INITIAL.
+****    go_zclass->send_message(
+****      EXPORTING
+****        i_type  = go_zclass->gc_type_error
+****        i_like  = go_zclass->gc_type_error
+****        i_msgno = '000' "Por favor, informe ao menos um documento
+****    ).
+****    RETURN.
+****  ENDIF.
+****
+*****  Chama a rotina conforme o modo selecionado
+****  CASE gv_mode.
+****    WHEN 'V'.
+****      PERFORM visualizar_dados.
+****    WHEN 'I'.
+****      PERFORM inserir_dados.
+****    WHEN 'D'.
+****      PERFORM deletar_dados.
+****  ENDCASE.
+****
+*****&---------------------------------------------------------------------*
+*****& FORM visualizar_dados
+*****&---------------------------------------------------------------------*
+****FORM visualizar_dados.
+****  SELECT * "Busca dados na tabela Z
+****    FROM ztbsd_aluno034
+****    INTO TABLE gt_output "Armazena o resultado em uma tabela interna
+****  WHERE docnum IN s_docnum. "Filtra os registros onde docnum está no intervalo definido na SELECT-OPTION s_docnum
+****
+****  IF sy-subrc = 0. "Se encontrou dados
+****    IF gv_background = abap_false.
+****      go_zclass->send_progress(
+****        EXPORTING
+****          i_percent = '50'
+****          i_text    = 'Processando dados...'
+****      ).
+****    ENDIF.
+****
+*****    Se estive em background, apenas registra no log
+****    IF gv_background = abap_true.
+****      go_zclass->send_message(
+****        EXPORTING
+****          i_type  = 'S'
+****          i_like  = 'S'
+****          i_msgno = '010'
+****          i_var1  = lines( gt_output ) "Função que conta o número de linhas na tabela interna
+****      ).
+****
+****    ELSE.
+****
+****      "Incio do bloco para tratamento de exceções
+****      TRY.
+****          cl_salv_table=>factory( "Cria um objeto ALV usando factory
+****            IMPORTING "Retorna o objeto ALV criado
+****              r_salv_table = go_alv "Retorna a instância do alv para a referencia go_alv
+****            CHANGING "Recebe os dados que serão exibidos (nossa tabela interna gt_output)
+****              t_table      = gt_output ). "Passa os dados da tabela interna para o ALV
+****
+****          " Obtém e configura as colunas
+****          go_columns = go_alv->get_columns( ).
+****
+****          " oculta a coluna DATA_JOB - Para nao aparecer duas colunas de data
+****          TRY.
+****              go_columns->get_column( 'DATA_JOB' )->set_visible( abap_false ).
+****            CATCH cx_salv_not_found.
+****              " Se a coluna não existir, continua sem erro
+****          ENDTRY.
+****
+****
+****          "Configura funções, habilita funções padrão do ALV
+****          go_functions = go_alv->get_functions( )."objeto de funções do ALV ( botões de ordenar e filtrar e outros)
+****          go_functions->set_all( abap_true ). "Habilita Funções padrão do ALV
+****          go_columns = go_alv->get_columns( ). "Gerencia as colunas
+****          go_columns->set_optimize( abap_true ). "Ajusta  a largura colunas
+****          go_alv->display( ). "Exibe tabela
+****
+****        CATCH
+****             cx_salv_msg INTO DATA(lx_error). "encontra exceções do SALV, armazena o erro na variável lx_error
+****          go_zclass->send_message( "chama a classe de mensagem
+****            EXPORTING
+****             i_type  = go_zclass->gc_type_error
+****             i_like  = go_zclass->gc_type_error
+****             i_msgno = '009' "Erro ao processar dados
+****             i_var1  = lx_error->get_text( )
+****          ).
+****      ENDTRY.
+****    ENDIF.
+****  ELSE. "Se o SELECT lá em cima falhar, exibe mensagem quando nenhum dado é encontrado
+****    go_zclass->send_message(
+****      EXPORTING
+****       i_type  = go_zclass->gc_type_info
+****       i_like  = go_zclass->gc_type_info
+****       i_msgno = '001' "Nenhum dado encontrado
+****    ).
+****  ENDIF.
+****ENDFORM.
+****
+****
+*****&---------------------------------------------------------------------*
+*****& FORM inserir_dados
+*****&---------------------------------------------------------------------*
+****FORM inserir_dados.
+****  DATA:
+****    ls_output        TYPE ztbsd_aluno034,
+****    lt_existing_docs TYPE TABLE OF ztbsd_aluno034,
+****    lt_j_1bnfdoc     TYPE TABLE OF j_1bnfdoc.
+****
+****  "Busca os documentos na tabela J_1BNFDOC
+****  SELECT *
+****    FROM j_1bnfdoc
+****    INTO TABLE lt_j_1bnfdoc
+****   WHERE docnum IN s_docnum
+****     AND cancel = ''          " Documentos que não foram cancelados
+****     AND fatura = 'X'         " Somente faturas
+****     AND partyp = 'C'         " Tipo de parceiro 'C'
+****     AND nftype = 'ZA'       " Tipo de nota fiscal 'ZA'
+****     AND docnum BETWEEN '000000001' AND '000050000'. "Range de notas
+****
+****
+****  IF lt_j_1bnfdoc IS INITIAL. "Verifica se a tabela lt_j_1bnfdoc não tem registro
+****    go_zclass->send_message( "Se for verdadeiro chama o método go_zclass para exibir mensagem
+****      EXPORTING
+****        i_type  = 'I'
+****        i_like  = 'I'
+****        i_msgno = '011' "Nenhum documento encontrado
+****        "i_var1  = 'Nenhum documento encontrado na J_1BNFDOC com os critérios especificados'
+****    ).
+****    RETURN.
+****  ENDIF.
+****
+****  "Busca os dados já existentes na tabela Z para evitar duplicidade
+****  IF lt_j_1bnfdoc IS NOT INITIAL. "Verificação se a tabela interna lt_j_1bnfdoc não está vazia
+****    SELECT docnum FROM ztbsd_aluno034
+****      INTO TABLE lt_existing_docs
+****      FOR ALL ENTRIES IN lt_j_1bnfdoc "
+****      WHERE docnum = lt_j_1bnfdoc-docnum.
+****  ENDIF.
+****
+****  "Processa cada documento encontrado na J_1BNFDOC
+****  LOOP AT lt_j_1bnfdoc INTO DATA(ls_j_1bnfdoc). "Percorre cada registro da tabela interna lt_j_1bnfdoc e para cada iteração, armazena na variável estrutural ls_j_1bnfdoc
+****    READ TABLE lt_existing_docs TRANSPORTING NO FIELDS " Verifica se documento já existe na tabela Z, comando TRANSPORTING NO FIELDS - não transporta dados, apenas verifica
+****      WITH KEY docnum = ls_j_1bnfdoc-docnum. "Especifica o campo chave para a busca (docnum)
+****    IF sy-subrc = 0. "Verificação SY, se retornar 0, quer dizer que foi encontrado na tabela ( está duplicado )
+****      go_zclass->send_message(
+****        EXPORTING
+****          i_type  = 'I' "Tipo I utilizado para que o programa não feche
+****          i_like  = 'I'
+****          i_msgno = '002' "Documento já existe na tabela
+****          i_var1  = ls_j_1bnfdoc-docnum
+****      ).
+****      CONTINUE. " Pula para o próximo se já existir
+****    ENDIF.
+****
+****    " Busca os itens e detalhes do documento
+****    DATA: "Variáveis declaradas para uso da função abaixo
+****      wk_item       TYPE TABLE OF j_1bnflin, "Busca itens da nota fiscal
+****      wk_partner    TYPE TABLE OF j_1bnfnad, "Busca parceiros (clientes/fornecedores)
+****      wk_item_tax   TYPE TABLE OF j_1bnfstx, "Imposto por item
+****      wk_header_msg TYPE TABLE OF j_1bnfftx, "Mensagem de cabeçalho
+****      wk_refer_msg  TYPE TABLE OF j_1bnfref. "Docs de referência
+****
+****    CALL FUNCTION 'J_1B_NF_DOCUMENT_READ' "Função que lê todos os dados de uma nota fiscal brasileira
+****      EXPORTING
+****        doc_number         = ls_j_1bnfdoc-docnum "Numero do doc fiscal
+****      IMPORTING "IMPORTING usado para cabeçalho
+****        doc_header         = ls_j_1bnfdoc  " Atualiza com dados completos
+****      TABLES "TABLES por conter múltiplos registros
+****        doc_partner        = wk_partner "Preenche tabela de parceiros
+****        doc_item           = wk_item  "Preenche tela de itens
+****        doc_item_tax       = wk_item_tax "Preenche tabela de impostos
+****        doc_header_msg     = wk_header_msg "Preenche mensagens
+****        doc_refer_msg      = wk_refer_msg "Preenche referências
+****      EXCEPTIONS
+****        document_not_found = 1 "Doc não encontrado
+****        docum_lock         = 2 "Doc bloqueado
+****        OTHERS             = 3.
+****
+****    IF sy-subrc <> 0 OR wk_item[] IS INITIAL.
+****      go_zclass->send_message(
+****        EXPORTING
+****          i_type  = go_zclass->gc_type_info
+****          i_like  = go_zclass->gc_type_info
+****          i_msgno = '003'
+****          i_var1  = ls_j_1bnfdoc-docnum
+****      ).
+****      CONTINUE.
+****    ENDIF.
+****
+****    " Processa os itens e insere na tabela Z
+****    LOOP AT wk_item "Itera sobre cada item da nota fiscal - armazenado em wk_item
+****         INTO DATA(ls_item). "Para cada iteração, armazena o item atual na estrutura ls_item
+****      CLEAR ls_output. "Limpa a estrutura de saida ls_output
+****      MOVE-CORRESPONDING ls_item TO ls_output. "Copia campos correspondentes da estrutura do item (ls_item) para a estrutura de saída (ls_output)
+****
+****      " Campos de controle - Adiciona metadados de controle
+****      ls_output-data_leitura = sy-datum.
+****      ls_output-data_job = sy-datum.
+****      ls_output-hora_job = sy-uzeit.
+****
+****      INSERT ztbsd_aluno034 FROM ls_output. "Insere o registro na tabela ztb..
+****      IF sy-subrc <> 0. "Verifica se a operação foi bem sucedida
+****        ROLLBACK WORK. "Se ocorrer erro, faz ROLLBACK de todas as alterações no banco de dados
+****        go_zclass->send_message(
+****          EXPORTING
+****            i_type  = 'E'
+****            i_like  = 'E'
+****            i_msgno = '002'
+****            i_var1  = ls_j_1bnfdoc-docnum
+****        ).
+****        EXIT.
+****      ENDIF.
+****    ENDLOOP.
+****
+****    "Após processar todos os itens SEM ERRO
+****    COMMIT WORK AND WAIT. "Confirma as alterações no BD
+****    go_zclass->send_message(
+****      EXPORTING
+****        i_type  = 'S'
+****        i_like  = 'S'
+****        i_msgno = '005'
+****        i_var1  = ls_j_1bnfdoc-docnum
+****    ).
+****  ENDLOOP.
+****ENDFORM.
+****
+*****&---------------------------------------------------------------------*
+*****& FORM deletar_dados
+*****&---------------------------------------------------------------------*
+****FORM deletar_dados.
+*****  Deleta registros conforme seleção
+****  DELETE FROM ztbsd_aluno034
+****        WHERE docnum
+****           IN s_docnum.
+****
+****  IF sy-subrc = 0.
+****    COMMIT WORK. "Confirma as exclusões no banco, exibe msg sucesso 'S'
+****    go_zclass->send_message(
+****      EXPORTING
+****        i_type  = 'S'
+****        i_like  = 'S'
+****        i_msgno = '006'
+****    ).
+****  ELSE.
+****    ROLLBACK WORK. "Desfaz alteração pendente no banco
+****    go_zclass->send_message(
+****      EXPORTING
+****        i_type  = 'I'
+****        i_like  = 'I'
+****        i_msgno = '007'
+****    ).
+****  ENDIF.
+****ENDFORM.
+
+
+
+
+
+*O CÓDIGO ABAIXO IMPLEMENTA A CLASSE QUE ERA REQUISITO CL_ALV_GRID
+
+
+
+
+
+
+
+
+
+
+
+
+
+*&---------------------------------------------------------------------*
+*& Report ZREPO_EXCPF_USUARIO_ALUNO34
+*&---------------------------------------------------------------------*
+REPORT zrepo_excpf_usuario_aluno34.
+
+* Tabelas transparentes
+TABLES:
+  ztbsd_aluno034, "Tabela transparente criada
+  j_1bnfdoc, "Tabela de cabeçalho de notas fiscais
+  j_1bnflin. "Tabela de itens de notas fiscais
+
+* Variáveis globais
+DATA:
+  gt_output     TYPE TABLE OF ztbsd_aluno034, "Tabela interna para armazenar dados, criada uma tabela de dados
+  go_container  TYPE REF TO cl_gui_custom_container, "Container para ALV
+  go_alv        TYPE REF TO cl_gui_alv_grid,  "Objeto ALV Grid
+  g_container         TYPE scrfname VALUE 'ALV_CONTAINER', "Container criado na SE80 - TELAS - com esse nome
+  gv_mode       TYPE c, "Modo - Inserir, Visualizar, Deletar
+  go_zclass     TYPE REF TO zcl_messages_aluno034, " Classe de mensagens criada 
+  gv_background TYPE abap_bool VALUE abap_false, "Indica se execução é em background
+  gt_fieldcat   TYPE lvc_t_fcat, "Catálogo de campos para ALV
+  gs_layout     TYPE lvc_s_layo, "Layout para ALV]
+  gt_excl TYPE ui_functions.
+
+* Tela de seleção
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+  SELECT-OPTIONS: s_docnum FOR j_1bnfdoc-docnum OBLIGATORY. "Nº do Documento
+
+  SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
+    PARAMETERS: "Cria parâmetros de entrada
+      p_insert RADIOBUTTON GROUP grp1 USER-COMMAND mode, "Inserir Dados
+      p_view   RADIOBUTTON GROUP grp1 DEFAULT 'X',      "Visualizar Dados
+      p_delete RADIOBUTTON GROUP grp1.                   "Deletar Registros
+  SELECTION-SCREEN END OF BLOCK b2.
+SELECTION-SCREEN END OF BLOCK b1.
+
+* Inicialização
+INITIALIZATION.
+  CREATE OBJECT go_zclass.
+
+START-OF-SELECTION.
+  gv_background = sy-batch.
+
+* Define o modo com base na seleção do usuário
+  IF p_insert = abap_true.
+    gv_mode = 'I'.
+  ELSEIF p_view = abap_true.
+    gv_mode = 'V'.
+  ELSEIF p_delete = abap_true.
+    gv_mode = 'D'.
+  ENDIF.
+
+* Verifica se foi informado algum documento
+  IF ( gv_mode = 'I' OR gv_mode = 'D' ) AND s_docnum[] IS INITIAL.
+    go_zclass->send_message(
+      EXPORTING
+        i_type  = go_zclass->gc_type_error
+        i_like  = go_zclass->gc_type_error
+        i_msgno = '000'
+    ).
+    RETURN.
+  ENDIF.
+
+* Chama a rotina conforme o modo selecionado
+  CASE gv_mode.
+    WHEN 'V'.
+      PERFORM visualizar_dados.
+    WHEN 'I'.
+      PERFORM inserir_dados.
+    WHEN 'D'.
+      PERFORM deletar_dados.
+  ENDCASE.
+
+*&---------------------------------------------------------------------*
+*& FORM visualizar_dados
+*&---------------------------------------------------------------------*
+FORM visualizar_dados.
+
+  "Busca dados na tabela interna ztbsd_aluno034
+  SELECT *
+    FROM ztbsd_aluno034
+    INTO TABLE gt_output "Armazena o resultado na tabela interna gt_output
+  WHERE docnum IN s_docnum. "Filtra pelos valores do parâmetro de seleção
+
+  IF sy-subrc = 0."Verifica se a consulta retornou 0
+    IF gv_background = abap_false.
+      go_zclass->send_progress(
+        EXPORTING
+          i_percent = '50'
+          i_text    = 'Processando dados...'
+      ).
+    ENDIF.
+
+* Se estiver em background, apenas registra no log
+    IF gv_background = abap_true.
+      go_zclass->send_message(
+        EXPORTING
+          i_type  = 'S'
+          i_like  = 'S'
+          i_msgno = '010'
+          i_var1  = lines( gt_output )
+      ).
+    ELSE.
+      " Exibe os dados usando ALV Grid
+      PERFORM display_alv_grid.
+    ENDIF.
+  ELSE.
+    go_zclass->send_message(
+      EXPORTING
+       i_type  = go_zclass->gc_type_info
+       i_like  = go_zclass->gc_type_info
+       i_msgno = '001'
+    ).
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& FORM display_alv_grid
+*& Configuração de UI
+*&---------------------------------------------------------------------*
+FORM display_alv_grid.
+
+  DATA: lv_title TYPE lvc_title. "Declara variável para título do relatório
+
+  " Cria o container customizado
+  CREATE OBJECT go_container "Instancia um container customizado com nome 'ALV_CONTAINER'
+    EXPORTING
+      container_name = 'ALV_CONTAINER'.
+
+  " Cria o ALV Grid
+  CREATE OBJECT go_alv "Instancia objeto dentro do container criado
+    EXPORTING
+      i_parent = go_container. "O parametro PARENT indica que o container é o 'pai' deste ALV
+
+  " Configura o layout
+  gs_layout-zebra      = abap_true.
+  gs_layout-cwidth_opt = abap_true.
+  gs_layout-sel_mode   = 'A'. " Modo de seleção
+  lv_title = 'Relatório projeto final ALV orientada a objetos - Programa de talentos SPRO 2025'.
+  gs_layout-grid_title = lv_title.
+
+  " Prepara o catálogo de campos
+  PERFORM prepare_field_catalog.
+
+  " Exibe o ALV
+  CALL METHOD go_alv->set_table_for_first_display
+    EXPORTING
+      is_layout       = gs_layout
+    CHANGING
+      it_outtab       = gt_output
+      it_fieldcatalog = gt_fieldcat.
+
+  " Exibe a tela
+  CALL SCREEN 0100.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& FORM prepare_field_catalog
+*& catálogo de campos, define como cada campo será exibido
+*&---------------------------------------------------------------------*
+FORM prepare_field_catalog.
+  DATA: ls_fcat TYPE lvc_s_fcat.
+
+  " Limpa o catálogo de campos
+  REFRESH gt_fieldcat.
+
+  " Define os campos que serão exibidos
+  PERFORM add_field USING:
+    'DOCNUM'        'Nº Documento'        'ZTBSD_ALUNO034' 'CHAR' 10,
+    'MATNR'         'Material'            'ZTBSD_ALUNO034' 'CHAR' 18,
+    'BWKEY'         'Centro de custo'     'ZTBSD_ALUNO034' 'CHAR' 15,
+    'CHARG'         'Lote'                'ZTBSD_ALUNO034' 'QUAN' 20,
+    'MATKL'         'Grupo de Material'   'ZTBSD_ALUNO034' 'QUAN' 20,
+    'MAKTX'         'Texto breve do mat.' 'ZTBSD_ALUNO034' 'CHAR' 40,
+    'NETPR'         'Preço Unitário'      'ZTBSD_ALUNO034' 'DEC'  2,
+    'NETWR'         'Valor Total'         'ZTBSD_ALUNO034' 'CURR' 2,
+    'DATA_LEITURA'  'Data Leitura'        'ZTBSD_ALUNO034' 'DATS' 8,
+    'DATA_JOB'      'Data Process.'       'ZTBSD_ALUNO034' 'DATS' 8,
+    'HORA_JOB'      'Hora Process.'       'ZTBSD_ALUNO034' 'TIMS' 6.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& FORM add_field
+*&---------------------------------------------------------------------*
+FORM add_field
+    USING
+        p_fieldname
+        p_coltext
+        p_tabname
+        p_datatype
+        p_outputlen.
+
+  DATA: ls_fcat TYPE lvc_s_fcat.
+
+  ls_fcat-fieldname = p_fieldname.
+  ls_fcat-coltext   = p_coltext.
+  ls_fcat-tabname   = p_tabname.
+  ls_fcat-datatype  = p_datatype.
+  ls_fcat-outputlen = p_outputlen.
+
+  " Configurações específicas por tipo de campo
+  CASE p_datatype.
+    WHEN 'QUAN'.
+      ls_fcat-qfieldname = 'MEINS'.
+    WHEN 'CURR'.
+      ls_fcat-cfieldname = 'WAERS'.
+  ENDCASE.
+
+  APPEND ls_fcat TO gt_fieldcat.
+ENDFORM.
+
+
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'STATUS_0100' EXCLUDING gt_excl. " Status com botão Voltar
+  "SET TITLEBAR 'TITLE_0100'.
+
+  " Criação do container apenas se não existir
+  IF go_container IS INITIAL.
+    CREATE OBJECT go_container
+      EXPORTING
+        container_name = 'ALV_CONTAINER'.
+  ENDIF.
+
+  " Criação do ALV apenas se não existir
+  IF go_alv IS INITIAL.
+    CREATE OBJECT go_alv
+      EXPORTING
+        i_parent = go_container. " Parâmetro corrigido para 'parent'
+
+    " Configuração do layout
+    gs_layout-zebra = abap_true.
+    gs_layout-cwidth_opt = abap_true.
+    gs_layout-sel_mode = 'A'.
+
+    " Prepara catálogo de campos
+    PERFORM prepare_field_catalog.
+
+    " Exibe o ALV
+    CALL METHOD go_alv->set_table_for_first_display
+      EXPORTING
+        is_layout       = gs_layout
+      CHANGING
+        it_outtab       = gt_output
+        it_fieldcatalog = gt_fieldcat.
+
+    " Registra eventos 
+    CALL METHOD go_alv->register_edit_event
+      EXPORTING
+        i_event_id = cl_gui_alv_grid=>mc_evt_enter.
+  ENDIF.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& Module USER_COMMAND_0100 INPUT
+*&---------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+  CASE sy-ucomm.
+    WHEN 'BACK' OR 'VOLTAR' OR '&F03'.
+      PERFORM free_alv_objects.
+      LEAVE TO SCREEN 0.
+
+    WHEN 'EXIT' OR '&F12'.
+      PERFORM free_alv_objects.
+      LEAVE PROGRAM.
+
+    WHEN 'REFRESH'.
+      PERFORM refresh_alv_data.
+
+    WHEN OTHERS.
+      IF go_alv IS BOUND.
+        CALL METHOD go_alv->check_changed_data.
+      ENDIF.
+  ENDCASE.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& Form FREE_ALV_OBJECTS
+*&---------------------------------------------------------------------*
+FORM free_alv_objects.
+  " Libera o objeto ALV se existir
+  IF go_alv IS BOUND.
+    CALL METHOD go_alv->free
+      EXCEPTIONS
+        OTHERS = 1.
+    FREE go_alv.
+  ENDIF.
+
+  " Libera o container se existir
+  IF go_container IS BOUND.
+    CALL METHOD go_container->free
+      EXCEPTIONS
+        OTHERS = 1.
+    FREE go_container.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form REFRESH_ALV_DATA
+*&---------------------------------------------------------------------*
+FORM refresh_alv_data.
+  IF go_alv IS BOUND.
+    PERFORM visualizar_dados. " Recarrega os dados
+    CALL METHOD go_alv->refresh_table_display.
+  ENDIF.
+ENDFORM.
+
+
+
+
+
+
+
+*&---------------------------------------------------------------------*
+*& FORM inserir_dados
+*&---------------------------------------------------------------------*
+FORM inserir_dados.
+  DATA:
+    ls_output        TYPE ztbsd_aluno034,
+    lt_existing_docs TYPE TABLE OF ztbsd_aluno034,
+    lt_j_1bnfdoc     TYPE TABLE OF j_1bnfdoc.
+
+  "Busca os documentos na tabela J_1BNFDOC
+  SELECT *
+    FROM j_1bnfdoc
+    INTO TABLE lt_j_1bnfdoc
+   WHERE docnum IN s_docnum
+     AND cancel = ''          " Documentos que não foram cancelados
+     AND fatura = 'X'         " Somente faturas
+     AND partyp = 'C'         " Tipo de parceiro 'C'
+     AND nftype = 'ZA'       " Tipo de nota fiscal 'ZA'
+     AND docnum BETWEEN '000000001' AND '000050000'. "Range de notas
+
+
+  IF lt_j_1bnfdoc IS INITIAL. "Verifica se a tabela lt_j_1bnfdoc não tem registro
+    go_zclass->send_message( "Se for verdadeiro chama o método go_zclass para exibir mensagem
+      EXPORTING
+        i_type  = 'I'
+        i_like  = 'I'
+        i_msgno = '011' "Nenhum documento encontrado
+        "i_var1  = 'Nenhum documento encontrado na J_1BNFDOC com os critérios especificados'
+    ).
+    RETURN.
+  ENDIF.
+
+  "Busca os dados já existentes na tabela Z para evitar duplicidade
+  IF lt_j_1bnfdoc IS NOT INITIAL. "Verificação se a tabela interna lt_j_1bnfdoc não está vazia
+    SELECT docnum FROM ztbsd_aluno034
+      INTO TABLE lt_existing_docs
+      FOR ALL ENTRIES IN lt_j_1bnfdoc "
+      WHERE docnum = lt_j_1bnfdoc-docnum.
+  ENDIF.
+
+  "Processa cada documento encontrado na J_1BNFDOC
+  LOOP AT lt_j_1bnfdoc INTO DATA(ls_j_1bnfdoc). "Percorre cada registro da tabela interna lt_j_1bnfdoc e para cada iteração, armazena na variável estrutural ls_j_1bnfdoc
+    READ TABLE lt_existing_docs TRANSPORTING NO FIELDS " Verifica se documento já existe na tabela Z, comando TRANSPORTING NO FIELDS - não transporta dados, apenas verifica
+      WITH KEY docnum = ls_j_1bnfdoc-docnum. "Especifica o campo chave para a busca (docnum)
+    IF sy-subrc = 0. "Verificação SY, se retornar 0, quer dizer que foi encontrado na tabela ( está duplicado )
+      go_zclass->send_message(
+        EXPORTING
+          i_type  = 'I' "Tipo I utilizado para que o programa não feche
+          i_like  = 'I'
+          i_msgno = '002' "Documento já existe na tabela
+          i_var1  = ls_j_1bnfdoc-docnum
+      ).
+      CONTINUE. " Pula para o próximo se já existir
+    ENDIF.
+
+    " Busca os itens e detalhes do documento
+    DATA: "Variáveis declaradas para uso da função abaixo
+      wk_item       TYPE TABLE OF j_1bnflin, "Busca itens da nota fiscal
+      wk_partner    TYPE TABLE OF j_1bnfnad, "Busca parceiros (clientes/fornecedores)
+      wk_item_tax   TYPE TABLE OF j_1bnfstx, "Imposto por item
+      wk_header_msg TYPE TABLE OF j_1bnfftx, "Mensagem de cabeçalho
+      wk_refer_msg  TYPE TABLE OF j_1bnfref. "Docs de referência
+
+    CALL FUNCTION 'J_1B_NF_DOCUMENT_READ' "Função que lê todos os dados de uma nota fiscal brasileira
+      EXPORTING
+        doc_number         = ls_j_1bnfdoc-docnum "Numero do doc fiscal
+      IMPORTING "IMPORTING usado para cabeçalho
+        doc_header         = ls_j_1bnfdoc  " Atualiza com dados completos
+      TABLES "TABLES por conter múltiplos registros
+        doc_partner        = wk_partner "Preenche tabela de parceiros
+        doc_item           = wk_item  "Preenche tela de itens
+        doc_item_tax       = wk_item_tax "Preenche tabela de impostos
+        doc_header_msg     = wk_header_msg "Preenche mensagens
+        doc_refer_msg      = wk_refer_msg "Preenche referências
+      EXCEPTIONS
+        document_not_found = 1 "Doc não encontrado
+        docum_lock         = 2 "Doc bloqueado
+        OTHERS             = 3.
+
+    IF sy-subrc <> 0 OR wk_item[] IS INITIAL.
+      go_zclass->send_message(
+        EXPORTING
+          i_type  = go_zclass->gc_type_info
+          i_like  = go_zclass->gc_type_info
+          i_msgno = '003'
+          i_var1  = ls_j_1bnfdoc-docnum
+      ).
+      CONTINUE.
+    ENDIF.
+
+    " Processa os itens e insere na tabela Z
+    LOOP AT wk_item "Itera sobre cada item da nota fiscal - armazenado em wk_item
+         INTO DATA(ls_item). "Para cada iteração, armazena o item atual na estrutura ls_item
+      CLEAR ls_output. "Limpa a estrutura de saida ls_output
+      MOVE-CORRESPONDING ls_item TO ls_output. "Copia campos correspondentes da estrutura do item (ls_item) para a estrutura de saída (ls_output)
+
+      " Campos de controle - Adiciona metadados de controle
+      ls_output-data_leitura = sy-datum.
+      ls_output-data_job = sy-datum.
+      ls_output-hora_job = sy-uzeit.
+
+      INSERT ztbsd_aluno034 FROM ls_output. "Insere o registro na tabela ztb..
+      IF sy-subrc <> 0. "Verifica se a operação foi bem sucedida
+        ROLLBACK WORK. "Se ocorrer erro, faz ROLLBACK de todas as alterações no banco de dados
+        go_zclass->send_message(
+          EXPORTING
+            i_type  = 'E'
+            i_like  = 'E'
+            i_msgno = '002'
+            i_var1  = ls_j_1bnfdoc-docnum
+        ).
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    "Após processar todos os itens SEM ERRO
+    COMMIT WORK AND WAIT. "Confirma as alterações no BD
+    go_zclass->send_message(
+      EXPORTING
+        i_type  = 'S'
+        i_like  = 'S'
+        i_msgno = '005'
+        i_var1  = ls_j_1bnfdoc-docnum
+    ).
+  ENDLOOP.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& FORM deletar_dados
+*&---------------------------------------------------------------------*
+FORM deletar_dados.
+*  Deleta registros conforme seleção
+  DELETE FROM ztbsd_aluno034
+        WHERE docnum
+           IN s_docnum.
+
+  IF sy-subrc = 0.
+    COMMIT WORK. "Confirma as exclusões no banco, exibe msg sucesso 'S'
+    go_zclass->send_message(
+      EXPORTING
+        i_type  = 'S'
+        i_like  = 'S'
+        i_msgno = '006'
+    ).
+  ELSE.
+    ROLLBACK WORK. "Desfaz alteração pendente no banco
+    go_zclass->send_message(
+      EXPORTING
+        i_type  = 'I'
+        i_like  = 'I'
+        i_msgno = '007'
+    ).
+  ENDIF.
+ENDFORM.
+
+
+**Fluxo do programa
+**
+**Relatório que manipula dados de notas fiscais, com três funcionalidades
+**Inserção
+**Visualização
+**Exclusão
+**De registros para uma tabela Z
+
+
+*requisitos não cumpridos
+*Utilizar a classe CL_ALV_GRID, usada a CL_SALV_TABLE
+*botões não implementados (back/canc/exit)
+*TYPES para definir as estruturas locais
